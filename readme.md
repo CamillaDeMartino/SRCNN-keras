@@ -16,14 +16,21 @@ My implementation have some difference with the original paper, include:
 
 ## Use:
 ### Create your own data
-open **prepare_data.py** and change the data path to your data
+Put your RGB training images in `data/raw/RGB/` or update the fallback path in `srcnn/prepare_data.py`.
 
 Excute:
-`python prepare_data.py`
+`python -m srcnn.prepare_data`
 
 ### training and test:
 Excute:
-`python main.py`
+`python -m srcnn.main`
+
+## Project layout:
+* `srcnn/` - source code
+* `data/` - training, test and processed datasets
+* `assets/` - example images used by the demo scripts
+* `weights/` - model checkpoints and weights
+* `outputs/` - generated predictions and intermediate results
 
 
 ## Result(training for 200 epoches on 91 images, with upscaling factor 2):
