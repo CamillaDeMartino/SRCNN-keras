@@ -3,6 +3,7 @@ from pathlib import Path
 import cv2
 import math
 import numpy
+import shutil
 from keras.callbacks import ModelCheckpoint
 from keras.layers import BatchNormalization, Conv2D, Input
 from keras.models import Sequential
@@ -20,61 +21,35 @@ PROCESSED_DATA_DIR = ROOT / "data" / "processed"
 OUTPUTS_DIR = ROOT / "outputs" / "Result"
 ASSETS_DIR = ROOT / "assets"
 
-def psnr(target, ref):
-    # assume RGB image
-    target_data = numpy.array(target, dtype=float)
-    ref_data = numpy.array(ref, dtype=float)
-
-    diff = ref_data - target_data
-    diff = diff.flatten('C')
-
-    rmse = math.sqrt(numpy.mean(diff ** 2.))
-
-    return 20 * math.log10(255. / rmse)
-
 
 def model():
-    # lrelu = LeakyReLU(alpha=0.1)
     SRCNN = Sequential()
-    # SRCNN.add(Conv2D(nb_filter=128, nb_row=9, nb_col=9, init='glorot_uniform',
-    #                  activation='relu', border_mode='valid', bias=True, input_shape=(32, 32, 1)))
-    # SRCNN.add(Conv2D(nb_filter=64, nb_row=3, nb_col=3, init='glorot_uniform',
-    #                  activation='relu', border_mode='same', bias=True))
-    # # SRCNN.add(BatchNormalization())
-    # SRCNN.add(Conv2D(nb_filter=1, nb_row=5, nb_col=5, init='glorot_uniform',
-    #                  activation='linear', border_mode='valid', bias=True))
-    
+
+    # First layer: 128 filters, 9x9 kernel, ReLU activation, valid padding
     SRCNN.add(Conv2D(filters=128, kernel_size=(9, 9), activation='relu',
-                     kernel_initializer='glorot_uniform', padding='valid', input_shape=(32, 32, 1)))
+                     kernel_initializer='glorot_uniform', padding='valid', input_shape=(32, 32, 3)))
+    # Second layer: 64 filters, 3x3 kernel, ReLU activation, same padding
     SRCNN.add(Conv2D(filters=64, kernel_size=(3, 3), activation='relu',
                      kernel_initializer='glorot_uniform', padding='same'))
-    SRCNN.add(Conv2D(filters=1, kernel_size=(5, 5), activation='linear',
+    # Third layer: 3 filters, 5x5 kernel, linear activation, valid padding
+    SRCNN.add(Conv2D(filters=3, kernel_size=(5, 5), activation='linear',
                      kernel_initializer='glorot_uniform', padding='valid'))
-    #adam = Adam(lr=0.0003)
     adam = Adam(learning_rate=0.0003)
     SRCNN.compile(optimizer=adam, loss='mean_squared_error', metrics=['mean_squared_error'])
     return SRCNN
 
 
 def predict_model():
-    # lrelu = LeakyReLU(alpha=0.1)
+
     SRCNN = Sequential()
-    # SRCNN.add(Conv2D(nb_filter=128, nb_row=9, nb_col=9, init='glorot_uniform',
-    #                  activation='relu', border_mode='valid', bias=True, input_shape=(None, None, 1)))
-    # SRCNN.add(Conv2D(nb_filter=64, nb_row=3, nb_col=3, init='glorot_uniform',
-    #                  activation='relu', border_mode='same', bias=True))
-    # # SRCNN.add(BatchNormalization())
-    # SRCNN.add(Conv2D(nb_filter=1, nb_row=5, nb_col=5, init='glorot_uniform',
-    #                  activation='linear', border_mode='valid', bias=True))
-    
 
     SRCNN.add(Conv2D(filters=128, kernel_size=(9, 9), activation='relu',
-                     kernel_initializer='glorot_uniform', padding='valid', input_shape=(None, None, 1)))
+                     kernel_initializer='glorot_uniform', padding='valid', input_shape=(None, None, 3)))
     SRCNN.add(Conv2D(filters=64, kernel_size=(3, 3), activation='relu',
                      kernel_initializer='glorot_uniform', padding='same'))
-    SRCNN.add(Conv2D(filters=1, kernel_size=(5, 5), activation='linear',
+    SRCNN.add(Conv2D(filters=3, kernel_size=(5, 5), activation='linear',
                      kernel_initializer='glorot_uniform', padding='valid'))
-    #adam = Adam(lr=0.0003)
+
     adam = Adam(learning_rate=0.0003)
     SRCNN.compile(optimizer=adam, loss='mean_squared_error', metrics=['mean_squared_error'])
     return SRCNN
@@ -83,19 +58,27 @@ def predict_model():
 def train():
     srcnn_model = model()
     print(srcnn_model.summary())
-    #data, label = pd.read_training_data("./train.h5")
+
     data, label = pd.read_training_data(str(PROCESSED_DATA_DIR / "crop_train.h5"))
     val_data, val_label = pd.read_training_data(str(PROCESSED_DATA_DIR / "test.h5"))
 
     WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
-    checkpoint = ModelCheckpoint(str(WEIGHTS_DIR / "SRCNN_check.h5"), monitor='val_loss', verbose=1, save_best_only=True,
-                                 save_weights_only=False, mode='min')
+    checkpoint = ModelCheckpoint(str(WEIGHTS_DIR / "SRCNN_check.h5"), 
+                                 monitor='val_loss', 
+                                 verbose=1, 
+                                 save_best_only=True,
+                                 save_weights_only=False, 
+                                 mode='min')
     callbacks_list = [checkpoint]
 
-    # srcnn_model.fit(data, label, batch_size=128, validation_data=(val_data, val_label),
-    #                 callbacks=callbacks_list, shuffle=True, nb_epoch=200, verbose=0)
-    srcnn_model.fit(data, label, batch_size=128, validation_data=(val_data, val_label),
-                    callbacks=callbacks_list, shuffle=True, epochs=200, verbose=0)
+    srcnn_model.fit(data, label, 
+                    batch_size=128, 
+                    validation_data=(val_data, val_label),
+                    callbacks=callbacks_list, 
+                    shuffle=True, 
+                    epochs=200, 
+                    verbose=0
+                    )
     # srcnn_model.load_weights("m_model_adam.h5")
 
 
@@ -103,50 +86,58 @@ def predict():
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
     srcnn_model = predict_model()
-    srcnn_model.load_weights(str(WEIGHTS_DIR / "3051crop_weight_200.h5"))
-    IMG_NAME = ASSETS_DIR / "input2.jpg"
+    srcnn_model.load_weights(str(WEIGHTS_DIR / "SRCNN_check.h5"))
+    IMG_NAME = ASSETS_DIR / "input2.jpg"            #DOVREBBE ESSERE .TIF O .JP2 MA PER OR ANON HO DATI
     INPUT_NAME = OUTPUTS_DIR / "input2.png"
     OUTPUT_NAME = OUTPUTS_DIR / "pre2.png"
 
-    REFERENCE_NAME = OUTPUTS_DIR / "reference.png"
-    img_reference = cv2.imread(str(IMG_NAME), cv2.IMREAD_COLOR)
-    cv2.imwrite(str(REFERENCE_NAME), img_reference)
+    # Original image is used as reference for PSNR calculation
+    REFERENCE_NAME = OUTPUTS_DIR / "reference.png"  #Devi modificare dipende dall'immagine che vuoi paragonare
+    shutil.copy(IMG_NAME, REFERENCE_NAME)
+    img_reference = cv2.imread(str(IMG_NAME), cv2.IMREAD_UNCHANGED)
 
-    
-    img = cv2.imread(str(IMG_NAME), cv2.IMREAD_COLOR)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
-    shape = img.shape
-    Y_img = cv2.resize(img[:, :, 0], (shape[1] // 2, shape[0] // 2), cv2.INTER_CUBIC)
-    Y_img = cv2.resize(Y_img, (shape[1], shape[0]), cv2.INTER_CUBIC)
-    img[:, :, 0] = Y_img
-    img = cv2.cvtColor(img, cv2.COLOR_YCrCb2BGR)
-    cv2.imwrite(str(INPUT_NAME), img)
+    if len(img_reference.shape) != 3 or img_reference.shape[2] != 3:
+        raise ValueError(f"L'immagine {IMG_NAME} non è RGB a 3 canali")
 
-    Y = numpy.zeros((1, img.shape[0], img.shape[1], 1), dtype=float)
-    Y[0, :, :, 0] = Y_img.astype(float) / 255.
-    pre = srcnn_model.predict(Y, batch_size=1) * 255.
-    pre[pre[:] > 255] = 255
-    pre[pre[:] < 0] = 0
-    pre = pre.astype(numpy.uint8)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
-    img[6: -6, 6: -6, 0] = pre[0, :, :, 0]
-    img = cv2.cvtColor(img, cv2.COLOR_YCrCb2BGR)
-    cv2.imwrite(str(OUTPUT_NAME), img)
+    # Save the reference image for PSNR calculation
+    shape = img_reference.shape
 
-    # psnr calculation:
-    im1 = cv2.imread(str(IMG_NAME), cv2.IMREAD_COLOR)
-    im1 = cv2.cvtColor(im1, cv2.COLOR_BGR2YCrCb)[6: -6, 6: -6, 0]
-    im2 = cv2.imread(str(INPUT_NAME), cv2.IMREAD_COLOR)
-    im2 = cv2.cvtColor(im2, cv2.COLOR_BGR2YCrCb)[6: -6, 6: -6, 0]
-    im3 = cv2.imread(str(OUTPUT_NAME), cv2.IMREAD_COLOR)
-    im3 = cv2.cvtColor(im3, cv2.COLOR_BGR2YCrCb)[6: -6, 6: -6, 0]
+    # Degradation using bicubic interpolation
+    # 1. Converto to float32 for processing
+    img_float = img_reference.astype(numpy.float32)
+    # 2. Downscale by a factor of 2 using bicubic interpolation
+    lr_img = cv2.resize(
+        img_float,
+        (shape[1] // 2, shape[0] // 2),
+        interpolation=cv2.INTER_CUBIC
+    )
+    # 3. Upscale back to original size using bicubic interpolation
+    bicubic_img = cv2.resize(
+        lr_img,
+        (shape[1], shape[0]),
+        interpolation=cv2.INTER_CUBIC
+    )
 
-    print("bicubic:")
-    print(cv2.PSNR(im1, im2))
-    print("SRCNN:")
-    print(cv2.PSNR(im1, im3))
+    # 4. Save the bicubic image for PSNR calculation (CLIPPING + CASTING)
+    bicubic_to_save = numpy.clip(bicubic_img, 0, 4095.0).astype(numpy.uint16)
+    cv2.imwrite(str(INPUT_NAME), bicubic_to_save)
+
+    # 5. Normalize the bicubic image to [0, 1] range for SRCNN input
+    X = bicubic_img / 4095.0
+    X = numpy.expand_dims(X, axis=0).astype(numpy.float32)   # (1, H, W, 3)
+
+    # 6. Predict the high-resolution image using SRCNN
+    pre = srcnn_model.predict(X, batch_size=1)
+
+    # 7. Denormalize the output back to [0, 4095] range and save
+    pre = pre * 4095.0
+    pre = numpy.clip(pre, 0, 4095.0)
+    pre = pre.astype(numpy.uint16)
+
+    # 8. Save the predicted image
+    cv2.imwrite(str(OUTPUT_NAME), pre[0])
 
 
 if __name__ == "__main__":
-    #train()
+    train()
     predict()

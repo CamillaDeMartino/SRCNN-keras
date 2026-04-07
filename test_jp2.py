@@ -1,82 +1,77 @@
 from pathlib import Path
 import sys
+import json
 
 import cv2
-import numpy as np
 
 
-def find_image_path() -> Path | None:
-	if len(sys.argv) > 1:
-		return Path(sys.argv[1]).expanduser()
+DATASET_DIR = Path("/storage/internal_02/SRCNN/dataset")
+REPORT_PATH = Path("assets/jp2_input_shapes.json")
 
-	current_dir = Path.cwd()
-	jp2_files = sorted(current_dir.rglob("*.jp2"))
-	return jp2_files[0] if jp2_files else None
+
+def find_jp2_files(dataset_dir: Path) -> list[Path]:
+	return sorted(dataset_dir.rglob("*.jp2"))
+
+
+def load_image(image_path: Path):
+	return cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
+
+
+def save_shapes_report(records: list[dict], output_path: Path) -> None:
+	output_path.parent.mkdir(parents=True, exist_ok=True)
+	with output_path.open("w", encoding="utf-8") as fp:
+		json.dump(records, fp, indent=2)
 
 
 def main() -> int:
-	image_path = find_image_path()
-	if image_path is None:
-		print("No .jp2 file found. Pass the image path as an argument.")
+	dataset_dir = Path(sys.argv[1]).expanduser() if len(sys.argv) > 1 else DATASET_DIR
+	report_path = Path(sys.argv[2]).expanduser() if len(sys.argv) > 2 else REPORT_PATH
+	if not dataset_dir.exists():
+		print(f"Dataset directory not found: {dataset_dir}")
 		return 1
 
-	image = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
-	if image is None:
-		print(f"Failed to open: {image_path}")
-		print("OpenCV on this system may not support JP2, or the file may be corrupted.")
+	jp2_files = find_jp2_files(dataset_dir)
+	if not jp2_files:
+		print(f"No .jp2 files found in: {dataset_dir}")
 		return 1
 
-	print(f"Opened: {image_path}")
-	print(f"Shape: {image.shape}")
-	print(f"Dtype: {image.dtype}")
-	print(f"Bit depth: {image.dtype.itemsize * 8} bits per channel")
-	print(f"Min pixel value: {image.min()}")
-	print(f"Max pixel value: {image.max()}")
-	print(f"Mean pixel value: {image.mean():.2f}")
-	print(f"Std pixel value: {image.std():.2f}")
+	loaded_images = []
+	failures = []
+	report_records = []
 
-	percentiles = [1, 5, 50, 95, 99]
-	percentile_values = {p: float(np.percentile(image, p)) for p in percentiles}
-	for p in percentiles:
-		print(f"Percentile {p}%: {percentile_values[p]:.2f}")
+	for idx, image_path in enumerate(jp2_files, start=1):
+		image = load_image(image_path)
+		if image is None:
+			failures.append(image_path)
+			print(f"FAILED: {image_path}")
+			report_records.append({
+				"file_name": image_path.name,
+				"shape": None,
+				"dtype": None,
+			})
+			continue
 
-	if image.dtype == np.uint16:
-		flat = image.reshape(-1)
-		for bits in (1, 2, 3, 4, 8):
-			remainder_mask = (1 << bits) - 1
-			zero_ratio = float(np.mean((flat & remainder_mask) == 0))
-			print(f"Zero ratio for lower {bits} bit(s): {zero_ratio:.4f}")
+		loaded_images.append((image_path, image))
+		print(f"LOADED: {image_path.name} shape={image.shape} dtype={image.dtype}")
+		report_records.append({
+			"file_name": image_path.name,
+			"shape": list(image.shape),
+			"dtype": str(image.dtype),
+		})
 
-		lower_4_zero_ratio = float(np.mean((flat & 0x000F) == 0))
-		if lower_4_zero_ratio > 0.95:
-			print("Pattern suggests 12-bit data may be stored in a 16-bit container (lower 4 bits mostly zero).")
-		elif lower_4_zero_ratio > 0.50:
-			print("Pattern suggests partial 12-bit-like storage or mild scaling in a 16-bit container.")
-		else:
-			print("Pattern does not look like clean 12-bit data stored in a 16-bit container.")
+	save_shapes_report(report_records, report_path)
+	print(f"JSON report saved to: {report_path}")
 
-	max_value = int(image.max())
-	if max_value <= 255:
-		likely_bits = 8
-	elif max_value <= 4095:
-		likely_bits = 12
-	elif max_value <= 65535:
-		likely_bits = 16
-	else:
-		likely_bits = image.dtype.itemsize * 8
-	print(f"Likely original bit depth: {likely_bits} bits per channel")
+	print(f"\nTotal files found: {len(jp2_files)}")
+	print(f"Successfully loaded: {len(loaded_images)}")
+	print(f"Failed to load: {len(failures)}")
 
-	display_image = image
-	if len(display_image.shape) == 2:
-		display_image = cv2.cvtColor(display_image, cv2.COLOR_GRAY2BGR)
-	max_width = 1400
-	max_height = 900
+	if failures:
+		print("\nUnloaded files:")
+		for image_path in failures:
+			print(image_path)
+		return 1
 
-	cv2.namedWindow("JP2 Image", cv2.WINDOW_NORMAL)
-	cv2.resizeWindow("JP2 Image", max_width, max_height)
-	#cv2.imshow("JP2 Image", display_image)
-	#cv2.waitKey(0)
-	cv2.destroyAllWindows()
 	return 0
 
 
