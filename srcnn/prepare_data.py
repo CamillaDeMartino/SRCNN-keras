@@ -7,19 +7,10 @@ import h5py
 import numpy
 import random
 import shutil
-
-DATASET_DIR = Path("/storage/internal_02/SRCNN/dataset")
-PROJECT_DIR = Path("/storage/internal_02/SRCNN")
-DATA_PATH = PROJECT_DIR / "Train_RGB"
-TEST_PATH = PROJECT_DIR /  "Test_RGB"
-PROCESSED_DIR = PROJECT_DIR / "processed"
-RGB_FOLDER = DATASET_DIR 
-
-Random_Crop = 30
-Patch_size = 32
-label_size = 20
-conv_side = 6
-scale = 2
+try:
+    from .config import *
+except Exception:
+    from config import *
 
 # Prepare Data for Testing and Validation
 def prepare_data(_path):

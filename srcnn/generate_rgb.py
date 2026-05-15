@@ -1,316 +1,258 @@
-import cv2
-import numpy as np
-from matplotlib import pyplot as plt
-import glob
 import os
 import re
+import glob
+import cv2
+import numpy as np
+
+try:
+    from .config import *
+except Exception:
+    from config import *
+
+
+try:
+    import cupy as cp
+    print("CuPy importato con successo. Le operazioni saranno accelerate via GPU.")
+    _use_gpu = True
+except ImportError:
+    print("CuPy non trovato. Le operazioni saranno eseguite su CPU (NumPy).")
+    _use_gpu = False
+
+
+PATCH_SIZE = 512
+BANDS_REQUIRED = {"B4", "B5", "B6"}
+
+
+def read_12bit_image(path):
     
-def extract_sub_matrices(image, block_dim):
-    n,m = image.shape[:2] 
-    sub_matrices = []
+    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+
+    if img is None:
+        raise ValueError(f"Impossibile leggere il file: {path}")
+
+    if img.ndim == 3:
+        img = img[:, :, 0]
+
+    if img.dtype != np.uint16:
+        img = img.astype(np.uint16)
+
+    return img
+
+
+def binning2x2_uint16(image):
     
-    for i in range(0, n - block_dim + 1, block_dim):
-        for j in range(0, m - block_dim + 1, block_dim):
-            sub_matrix = image[i:i+block_dim, j: j+block_dim]            
-            sub_matrices.append(sub_matrix)
-    
-    return sub_matrices
+    h, w = image.shape
 
-def save_images(sub_matrices, output_folder, start_index, prefix, image_filename):
+    h_even = h - (h % 2)
+    w_even = w - (w % 2)
 
-    #Extract triplet number
-    base_name = os.path.basename(image_filename)
-    match = re.search(r"LC08_L1[TG][TP]_(\d{6})_", base_name)    
-    id_part = match.group(1)
+    image = image[:h_even, :w_even]
 
-    for idx, sub_matrix in enumerate(sub_matrices):
-        #filename = os.path.join(output_folder, f"{prefix}_{start_index + idx:04d}.png")
-        filename = os.path.join(output_folder, f"{prefix}_{id_part}_{start_index + idx:04d}.png")
-        success = cv2.imwrite(filename, sub_matrix) 
-        if not success:
-            print(f"Error on saving {filename}")
-    
-    return start_index + len(sub_matrices)
+    if _use_gpu:
+        try:
+            # Trasferisci l'immagine alla GPU
+            image_gpu = cp.asarray(image)
 
-def extract_512x512(images, output_folder, prefix):
-    
-    # Create the output folder if it doesn't exist
-    os.makedirs(output_folder, exist_ok=True)  
+            # Esegui il binning su GPU
+            binned_gpu = (
+                image_gpu[0::2, 0::2].astype(cp.uint32) +
+                image_gpu[1::2, 0::2].astype(cp.uint32) +
+                image_gpu[0::2, 1::2].astype(cp.uint32) +
+                image_gpu[1::2, 1::2].astype(cp.uint32)
+            ) // 4
 
-    # set = extract_sub_matrices(image, 512)
-    # print("len set: ", len(set))
-    # current_index = save_images(set, output_folder, 0, prefix)
+            # Ritorna l'immagine alla CPU come uint16
+            return cp.asnumpy(binned_gpu).astype(np.uint16)
+        except Exception as e:
+            print(f"Errore durante l'esecuzione su GPU: {e}. Fallback a CPU (NumPy).")
+            # Se c'è un errore con CuPy, esegui su CPU
+            pass # Continua all'implementazione CPU
 
-    # Find images
-    i = 0
-    current_index = 0
-    for img_path in images:
-        # Load the image
-        image = cv2.imread(img_path)
+    # Implementazione CPU (NumPy)
+    binned_cpu = (
+        image[0::2, 0::2].astype(np.uint32) +
+        image[1::2, 0::2].astype(np.uint32) +
+        image[0::2, 1::2].astype(np.uint32) +
+        image[1::2, 1::2].astype(np.uint32)
+    ) // 4
 
-        size = image.shape[:2]
-        print(f"Image {i} size: ", size)
-        i += 1
-
-        set = extract_sub_matrices(image, 512)
-        print("len set: ", len(set))
-        current_index = save_images(set, output_folder, current_index, prefix, img_path)
-
-def binning2x2(image, offset_x, offset_y):
-   
-    n,m = image.shape[:2]
-
-    new_height = (n - offset_y) // 2 + (1 if (n - offset_y) % 2 != 0 else 0)
-    new_width = (m -offset_x) // 2 + (1 if (m - offset_x) % 2 != 0 else 0)
-
-    low_img = np.zeros((new_height, new_width))
-    
-    for i in range(0, n, 2):
-        for j in range(0, m, 2):
-            
-            #block with offset
-            i_offset = i + offset_y
-            j_offset = j + offset_x
-            if i_offset < n and j_offset < m:
-                block = image[i_offset:min(i_offset+2, n), j_offset:min(j_offset+2, m)]
-                low_img[i//2, j//2] = np.mean(block)
-
-    return low_img
-
-def extract_256x256(images, output_folder, prefix, offset_x, offset_y):
-
-    # Create the output folder if it doesn't exist
-    os.makedirs(output_folder, exist_ok=True)  
-
-    # low = binning2x2(image, offset_x, offset_y)
-    # print("len low: ", low.shape[:2])
-
-    # set = extract_sub_matrices(low, 256)
-    # print("len set: ", len(set))
-    # current_index = save_images(set, output_folder, 0, prefix)
-
-    # Find images
-    i = 0
-    current_index = 0
-    for img_path in images:
-        # Load the image
-        image = cv2.imread(img_path)
-
-        size = image.shape[:2]
-        print(f"Image {i} size: ", size)
-        i += 1
-
-        low = binning2x2(image, offset_x, offset_y)
-        print("len low: ", low.shape[:2])
-
-        set = extract_sub_matrices(low, 256)
-        print("len set: ", len(set))
-        current_index = save_images(set, output_folder, current_index, prefix, img_path)
-
-def extract_512x512_B8(images, output_folder, prefix):
-    # Create the output folder if it doesn't exist
-    os.makedirs(output_folder, exist_ok=True)  
-
-    # image = image[1:, 0:]
-    # print("Cut B8 size: ", image.shape[:2])
-
-    # low = binning2x2(image, 0, 0)
-    # print("len low: ", low.shape[:2])
-
-    # set = extract_sub_matrices(low, 512)
-    # print("len set: ", len(set))
-    # current_index = save_images(set, output_folder, 0, prefix)
+    return binned_cpu.astype(np.uint16)
 
 
-    # Find images
-    i = 0
-    current_index = 0
-    for img_path in images:
-        # Load the image
-        image = cv2.imread(img_path)
+def extract_scene_id_and_band(filename):
+    """
+    Supporta:
+    LC08_L1TP_182043_20260427_20260427_02_RT_B4.tif
+    T15WWS_20251013T181331_B04.jp2
+    """
+    base = os.path.basename(filename)
 
-        size = image.shape[:2]
-        print(f"Image {i} size: ", size)
-        i += 1
+    # Landsat
+    match_landsat = re.match(
+        r"(LC0[89]_L1[TG]P_\d{6}_\d{8}_\d{8}_\d{2}_(RT|T1))_(B[45678])\.(tif|tiff)$",
+        base,
+        re.IGNORECASE
+    )
 
-        image_cut = image[1:, 0:]
-        print("Cut B8 size: ", image_cut.shape[:2])
+    if match_landsat:
+        scene_id = match_landsat.group(1)
+        band = match_landsat.group(3).upper() # Corrected from group(2) to group(3)
+        return scene_id, band
 
-        low = binning2x2(image_cut, 0, 0)
-        print("len low: ", low.shape[:2])
+    #JP2
+    match_jp2 = re.match(
+        r"(.+?)_(B0?[45678])\.jp2$",
+        base,
+        re.IGNORECASE
+    )
 
-        set = extract_sub_matrices(low, 512)
-        print("len set: ", len(set))
-        current_index = save_images(set, output_folder, current_index, prefix,img_path)
+    if match_jp2:
+        scene_id = match_jp2.group(1)
+        band = match_jp2.group(2).upper().replace("B0", "B")
+        return scene_id, band
 
-def extract_256x256_B8(images, output_folder, prefix):
-
-    # Create the output folder if it doesn't exist
-    os.makedirs(output_folder, exist_ok=True)  
-
-    # low1 = binning2x2(image,0,0)
-    # low2 = binning2x2(image, 1, 1)
-    # print("len low1: ", low1.shape[:2])
-    # print("len low2: ", low2.shape[:2])
-
-
-    # set1 = extract_sub_matrices(low1, 256)
-    # print("len set1: ", len(set1))
-    # current_index = save_images(set1, output_folder, 0, prefix)
-
-    # set2 = extract_sub_matrices(low2, 256)
-    # print("len set2: ", len(set2))
-    # current_index = save_images(set2, output_folder, current_index, prefix)
-
-    # Find images
-    i = 0
-    current_index = 0
-    for img_path in images:
-        # Load the image
-        image = cv2.imread(img_path)
-
-        size = image.shape[:2]
-        print(f"Image {i} size: ", size)
-        i += 1
-
-        image_cut = image[1:, 0:]
-        print("Cut B8 size: ", image_cut.shape[:2])
-
-        low1 = binning2x2(image_cut,0,0)
-        low2 = binning2x2(image_cut, 1, 1)
-        print("len low1: ", low1.shape[:2])
-        print("len low2: ", low2.shape[:2])
-
-        set1 = extract_sub_matrices(low1, 256)
-        print("len set1: ", len(set1))
-        current_index = save_images(set1, output_folder, current_index, prefix, img_path)
-
-        set2 = extract_sub_matrices(low2, 256)
-        print("len set2: ", len(set2))
-        current_index = save_images(set2, output_folder, current_index, prefix, img_path)
+    return None, None
 
 
-def crea_cubo_rgb_unico(folder_B5, folder_B8, folder_B4, output_folder, id_noB8):
+def group_triplets(input_folder):
+    """
+    Raggruppa automaticamente le immagini per scena.
+    Tiene solo B4, B5, B6.
+    Ignora B7 e B8.
+    """
+    files = glob.glob(os.path.join(input_folder, "*.tif"))
+    files += glob.glob(os.path.join(input_folder, "*.TIF"))
+    files += glob.glob(os.path.join(input_folder, "*.tiff"))
+    files += glob.glob(os.path.join(input_folder, "*.TIFF"))
+    files += glob.glob(os.path.join(input_folder, "*.jp2"))
+    files += glob.glob(os.path.join(input_folder, "*.JP2"))
+
+    scenes = {}
+    print(f"Trovati {len(files)} file immagine.")
+
+    for path in files:
+        scene_id, band = extract_scene_id_and_band(path)
+        print(f"Processing: {os.path.basename(path)}, Extracted: Scene ID={scene_id}, Band={band}")
+
+        if scene_id is None or band is None:
+            continue
+
+        if band not in BANDS_REQUIRED:
+            continue
+
+        scenes.setdefault(scene_id, {})
+        scenes[scene_id][band] = path
+
+    complete_triplets = {
+        scene_id: bands
+        for scene_id, bands in scenes.items()
+        if BANDS_REQUIRED.issubset(bands.keys())
+    }
+
+    incomplete = {
+        scene_id: bands
+        for scene_id, bands in scenes.items()
+        if not BANDS_REQUIRED.issubset(bands.keys())
+    }
+
+    print(f"Triplette complete trovate: {len(complete_triplets)}")
+    print(f"Scene incomplete ignorate: {len(incomplete)}")
+    print(f"Scene riconosciute: {list(complete_triplets.keys())}") # Added print statement
+
+    return complete_triplets
+
+
+def align_bands(b4, b5, b6):
+    """
+    Se B4 ha risoluzione doppia rispetto a B5/B6, viene binnata 2x2.
+    Poi tutte le bande vengono tagliate alla dimensione comune minima.
+    """
+
+    if b4.shape[0] >= 2 * b5.shape[0] - 2 and b4.shape[1] >= 2 * b5.shape[1] - 2:
+        print("B4 ha risoluzione doppia: applico binning 2x2")
+        b4 = binning2x2_uint16(b4)
+
+    min_h = min(b4.shape[0], b5.shape[0], b6.shape[0])
+    min_w = min(b4.shape[1], b5.shape[1], b6.shape[1])
+
+    b4 = b4[:min_h, :min_w]
+    b5 = b5[:min_h, :min_w]
+    b6 = b6[:min_h, :min_w]
+
+    return b4, b5, b6
+
+
+def save_cube_patches(scene_id, b4, b5, b6, output_folder):
+    """
+    Crea cubi a 3 canali e salva patch 512x512.
+    Ordine canali: B4, B5, B6.
+    """
 
     os.makedirs(output_folder, exist_ok=True)
 
-    for filename in os.listdir(folder_B8):
-        match = re.match(r"B8_(\d{6}_\d{4})\.png", filename)
-        if not match:
-            continue
+    h, w = b4.shape
+    patch_index = 0
 
-        id = match.group(1)
+    for y in range(0, h - PATCH_SIZE + 1, PATCH_SIZE):
+        for x in range(0, w - PATCH_SIZE + 1, PATCH_SIZE):
 
-        path_B8 = os.path.join(folder_B8, filename)
-        path_B4 = os.path.join(folder_B4, f"B4_{id}.png")
-        path_B5 = os.path.join(folder_B5, f"B5_{id}.png")
+            patch_b4 = b4[y:y + PATCH_SIZE, x:x + PATCH_SIZE]
+            patch_b5 = b5[y:y + PATCH_SIZE, x:x + PATCH_SIZE]
+            patch_b6 = b6[y:y + PATCH_SIZE, x:x + PATCH_SIZE]
 
-        if not (os.path.exists(path_B4) and os.path.exists(path_B5)):
-            print(f"Mancano B4 o B5 per ID {id}")
-            continue
+            cube = np.stack([patch_b5, patch_b6, patch_b4], axis=-1)
 
-        # Leggi immagini
-        b4 = cv2.imread(path_B4, cv2.IMREAD_GRAYSCALE)
-        b5 = cv2.imread(path_B5, cv2.IMREAD_GRAYSCALE)
-        b8 = cv2.imread(path_B8, cv2.IMREAD_GRAYSCALE)
+            output_name = f"RGB_{scene_id}_{patch_index:04d}.tif"
+            output_path = os.path.join(output_folder, output_name)
 
-        if b5 is None or b8 is None or b4 is None:
-            raise ValueError("One or more images were not loaded correctly.")
+            success = cv2.imwrite(output_path, cube)
 
-
-        # Stack on 3 channels: R = B5, G = B8, B = B4
-        cube_rgb = np.stack([b5, b8, b4], axis=-1)
-        nome_output = os.path.join(f"RGB_{id}.png")
+            if not success:
+                print(f"Errore nel salvataggio: {output_path}")
+            else:
+              test = cv2.imread(output_path, cv2.IMREAD_UNCHANGED)
+              if test is None or test.dtype != np.uint16 or test.shape != cube.shape:
+                print(f"Attenzione: salvataggio non verificato correttamente: {output_path}")
 
 
-        # Salva l'immagine
-        output_path = os.path.join(output_folder, nome_output)
-        cv2.imwrite(output_path, cube_rgb)
+            patch_index += 1
 
-    
+    print(f"{scene_id}: salvate {patch_index} patch")
 
 
+def process_dataset(input_folder, output_folder):
+    triplets = group_triplets(input_folder)
+
+    for scene_id, bands in triplets.items():
+        print(f"\nElaboro scena: {scene_id}")
+
+        b4 = read_12bit_image(bands["B4"])
+        b5 = read_12bit_image(bands["B5"])
+        b6 = read_12bit_image(bands["B6"])
+
+        print("Shape originali:")
+        print("B4:", b4.shape, b4.dtype)
+        print("B5:", b5.shape, b5.dtype)
+        print("B6:", b6.shape, b6.dtype)
+
+        b4, b5, b6 = align_bands(b4, b5, b6)
+
+        print("Shape allineate:")
+        print("B4:", b4.shape)
+        print("B5:", b5.shape)
+        print("B6:", b6.shape)
+
+        save_cube_patches(scene_id, b4, b5, b6, output_folder)
 
 
 def main():
-    
-    # folder of images
-    folder = "/home/camilla/Scrivania/Tesi/Images"
-    
-    ##-----------B4 -B5----------------------------------
+    input_folder = DATASET_DIR
+    output_folder = RGB_FOLDER
 
-    # Output folder where sub-images will be saved
-    output_folder_B4_1 = "/home/camilla/Scrivania/Tesi/Data_Set_B4_512"
-    output_folder_B4_2 = "/home/camilla/Scrivania/Tesi/Data_Set_B4_256"
+    # print(f"Input folder: {input_folder}")
+    # print(f"Output folder: {output_folder}")
+    process_dataset(input_folder, output_folder)
 
-    # Load the image B4
-    # image_B4 = cv2.imread("/home/camilla/Scrivania/Tesi/Images/LC08_L1TP_193028_20210221_20210303_02_T1_B4.TIF")
-    # size = image_B4.shape[:2]
-    # print("Image B4 size: ", size)
-
-    images_B4 = sorted(glob.glob(os.path.join(folder, "*B4*.TIF")))
-    print("Number of images found: ", len(images_B4))
-
-    #extract_512x512(images_B4,output_folder_B4_1,"B4")
-    #extract_256x256(images_B4,output_folder_B4_2, "B4",0,0)
-
-
-    # Output folder where sub-images will be saved
-    output_folder_B5_1 = "/home/camilla/Scrivania/Tesi/Data_Set_B5_512"
-    output_folder_B5_2 = "/home/camilla/Scrivania/Tesi/Data_Set_B5_256"
-
-
-    # Load the image B5
-    # image_B5 = cv2.imread("/home/camilla/Scrivania/Tesi/Images/LC08_L1TP_193028_20210221_20210303_02_T1_B5.TIF")
-    # size = image_B5.shape[:2]
-    # print("Image B5 size: ", size)
-    images_B5 = sorted(glob.glob(os.path.join(folder, "*B5*.TIF")))
-    print("Number of images found: ", len(images_B5))
-
-    #extract_512x512(images_B5,output_folder_B5_1,"B5")
-    #extract_256x256(images_B5,output_folder_B5_2, "B5",1,1)
-
-
-    ##--------------B8-------------------------------------------
-    # Load the image B8
-    # image_B8 = cv2.imread("/home/camilla/Scrivania/Tesi/Images/LC08_L1TP_193028_20210221_20210303_02_T1_B8.TIF")
-    # print("Original B8 size: ", image_B8.shape[:2])
-   
-    images_B8 = sorted(glob.glob(os.path.join(folder, "*B8*.TIF")))
-    print("Number of images found: ", len(images_B8))
-
-    output_folder_B8_1 = "/home/camilla/Scrivania/Tesi/Data_Set_B8_512"
-    #extract_512x512_B8(images_B8, output_folder_B8_1, "B8")   
-
-    output_folder_B8_2 = "/home/camilla/Scrivania/Tesi/Data_Set_B8_256"
-    #extract_256x256_B8(images_B8, output_folder_B8_2, "B8")
-
-
-    ##---------------------------RGB---------------------------------
-    no_B8 = "192030_20190516"
-    base_folder = "/home/camilla/Scrivania/Tesi"
-    folder_B4 = os.path.join(base_folder, "Data_Set_B4_512")
-    folder_B5 = os.path.join(base_folder, "Data_Set_B5_512")
-    folder_B8 = os.path.join(base_folder, "Data_Set_B8_512")
-    output_folder_RGB = os.path.join(base_folder, "RGB")
-
-    # id = "038036_0288"
-    # # Genera i path dei file basati sull'identificativo
-    # B4_path = os.path.join(folder_B4, f"B4_{id}.png")
-    # B5_path = os.path.join(folder_B5, f"B5_{id}.png")
-    # B8_path = os.path.join(folder_B8, f"B8_{id}.png")
-
-    crea_cubo_rgb_unico(folder_B5, folder_B8, folder_B4, output_folder_RGB, no_B8)
-
-    # b5 = cv2.imread(B5_path, cv2.IMREAD_GRAYSCALE)
-    # b8 = cv2.imread(B8_path, cv2.IMREAD_GRAYSCALE)
-    # b4 = cv2.imread(B4_path, cv2.IMREAD_GRAYSCALE)
- 
-
-    # # Salva con ID nel nome
-    # cv2.imwrite(os.path.join("/home/camilla/Scrivania/Tesi/RGB", f"B4_{id}.png"), b4)
-    # cv2.imwrite(os.path.join("/home/camilla/Scrivania/Tesi/RGB", f"B5_{id}.png"), b5)
-    # cv2.imwrite(os.path.join("/home/camilla/Scrivania/Tesi/RGB", f"B8_{id}.png"), b8)
 
 if __name__ == "__main__":
     main()

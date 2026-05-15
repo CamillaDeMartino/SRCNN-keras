@@ -34,3 +34,7 @@ data/processed/
 
 # Model outputs
 outputs/
+
+# Logs and job scripts
+logs/
+*.sbatch
