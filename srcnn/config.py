@@ -3,10 +3,11 @@ from pathlib import Path
 # Paths
 DATASET_DIR = Path("/storage/internal_02/SRCNN/dataset")
 PROJECT_DIR = Path("/storage/internal_02/SRCNN")
-DATA_PATH = PROJECT_DIR / "Train_RGB"
-TEST_PATH = PROJECT_DIR / "Test_RGB"
+TRAIN_RGB = PROJECT_DIR / "Train_RGB"
+TEST_RGB = PROJECT_DIR / "Test_RGB"
 PROCESSED_DIR = PROJECT_DIR / "processed"
 RGB_FOLDER = PROJECT_DIR / "dataset_rgb" 
+RGB_NORM = PROJECT_DIR / "dataset_rgb_norm"
 
 # Training parameters
 Random_Crop = 30

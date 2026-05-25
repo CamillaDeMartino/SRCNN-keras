@@ -38,3 +38,6 @@ outputs/
 # Logs and job scripts
 logs/
 *.sbatch
+
+#assets
+assets/

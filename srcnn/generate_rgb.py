@@ -25,7 +25,8 @@ BANDS_REQUIRED = {"B4", "B5", "B6"}
 
 def read_12bit_image(path):
     
-    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    #img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    img = cv2.imread(path, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_GRAYSCALE)
 
     if img is None:
         raise ValueError(f"Impossibile leggere il file: {path}")
@@ -88,15 +89,17 @@ def extract_scene_id_and_band(filename):
     base = os.path.basename(filename)
 
     # Landsat
+    # Accetta varianti di prefisso Landsat come L1TP, L1GT, L1GP, L1.. ecc.
+    # Estrae il scene id completo e qualsiasi banda nel formato B<number>.
     match_landsat = re.match(
-        r"(LC0[89]_L1[TG]P_\d{6}_\d{8}_\d{8}_\d{2}_(RT|T1))_(B[45678])\.(tif|tiff)$",
+        r"(LC0[89]_L1[A-Z]{1,3}_\d{6}_\d{8}_\d{8}_\d{2}_(?:RT|T1))_(B\d+)\.(tif|tiff)$",
         base,
-        re.IGNORECASE
+        re.IGNORECASE,
     )
 
     if match_landsat:
         scene_id = match_landsat.group(1)
-        band = match_landsat.group(3).upper() # Corrected from group(2) to group(3)
+        band = match_landsat.group(2).upper()
         return scene_id, band
 
     #JP2
@@ -182,13 +185,45 @@ def align_bands(b4, b5, b6):
     return b4, b5, b6
 
 
+def normalize_cube_per_channel(cube):
+    """
+    Normalizza ogni canale del cubo separatamente in [0, 1].
+    I pixel NoData (=0) vengono preservati a 0.0.
+    """
+
+    cube_float = np.zeros_like(cube, dtype=np.float32)
+
+    for c in range(cube.shape[-1]):
+
+        channel = cube[:, :, c]
+
+        valid_mask = channel > 0
+        valid = channel[valid_mask]
+
+        if valid.size == 0:
+            continue
+
+        channel_min = valid.min()
+        channel_max = valid.max()
+
+        if channel_max == channel_min:
+            cube_float[:, :, c][valid_mask] = 1.0
+            continue
+
+        cube_float[:, :, c][valid_mask] = (
+            channel[valid_mask].astype(np.float32) - channel_min
+        ) / (channel_max - channel_min)
+
+    return cube_float
+
 def save_cube_patches(scene_id, b4, b5, b6, output_folder):
     """
     Crea cubi a 3 canali e salva patch 512x512.
-    Ordine canali: B4, B5, B6.
+    Ordine canali: B5, B6, B4.
     """
 
     os.makedirs(output_folder, exist_ok=True)
+    os.makedirs(RGB_NORM, exist_ok=True)
 
     h, w = b4.shape
     patch_index = 0
@@ -201,11 +236,18 @@ def save_cube_patches(scene_id, b4, b5, b6, output_folder):
             patch_b6 = b6[y:y + PATCH_SIZE, x:x + PATCH_SIZE]
 
             cube = np.stack([patch_b5, patch_b6, patch_b4], axis=-1)
+            cube_norm = normalize_cube_per_channel(cube)
 
+            #Cube RGB unti16
             output_name = f"RGB_{scene_id}_{patch_index:04d}.tif"
             output_path = os.path.join(output_folder, output_name)
 
+            #Cube RGB float32 
+            output_name_norm = f"RGB_{scene_id}_{patch_index:04d}.npy"
+            output_path_norm = os.path.join(RGB_NORM, output_name_norm)
+
             success = cv2.imwrite(output_path, cube)
+            np.save(output_path_norm, cube_norm)
 
             if not success:
                 print(f"Errore nel salvataggio: {output_path}")
@@ -214,7 +256,16 @@ def save_cube_patches(scene_id, b4, b5, b6, output_folder):
               if test is None or test.dtype != np.uint16 or test.shape != cube.shape:
                 print(f"Attenzione: salvataggio non verificato correttamente: {output_path}")
 
+            test_norm = np.load(output_path_norm)
 
+            if (
+                test_norm.dtype != np.float32
+                or test_norm.shape != cube_norm.shape
+                or np.isnan(test_norm).any()
+                or test_norm.min() < 0.0
+                or test_norm.max() > 1.0
+            ):
+                print(f"Attenzione: salvataggio normalizzato non verificato correttamente: {output_path_norm}")
             patch_index += 1
 
     print(f"{scene_id}: salvate {patch_index} patch")
@@ -243,6 +294,9 @@ def process_dataset(input_folder, output_folder):
         print("B6:", b6.shape)
 
         save_cube_patches(scene_id, b4, b5, b6, output_folder)
+
+
+
 
 
 def main():
