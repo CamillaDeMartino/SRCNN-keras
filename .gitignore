@@ -10,6 +10,7 @@ __pycache__/
 
 # Model weights and large training artifacts
 *.h5
+!weights/train_smallC.h5
 *.hdf5
 *.ckpt
 *.pth

@@ -1,6 +1,6 @@
-numpy
-opencv-python
+numpy<2.0.0
+opencv-python<4.13
 h5py
 matplotlib
-tensorflow
-keras
+scikit-image
+tensorflow[and-cuda]==2.17.1
