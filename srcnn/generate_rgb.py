@@ -127,8 +127,8 @@ def group_triplets(input_folder):
     files += glob.glob(os.path.join(input_folder, "*.TIF"))
     files += glob.glob(os.path.join(input_folder, "*.tiff"))
     files += glob.glob(os.path.join(input_folder, "*.TIFF"))
-    files += glob.glob(os.path.join(input_folder, "*.jp2"))
-    files += glob.glob(os.path.join(input_folder, "*.JP2"))
+    #files += glob.glob(os.path.join(input_folder, "*.jp2"))
+    #files += glob.glob(os.path.join(input_folder, "*.JP2"))
 
     scenes = {}
     print(f"Trovati {len(files)} file immagine.")
@@ -184,8 +184,34 @@ def align_bands(b4, b5, b6):
 
     return b4, b5, b6
 
+def compute_global_max(triplets):
+    global_max = 0
 
-def normalize_cube_per_channel(cube):
+    for scene_id, bands in triplets.items():
+        print(f"Calcolo max globale scena: {scene_id}")
+
+        for band_name in BANDS_REQUIRED:
+            img = read_12bit_image(bands[band_name])
+            max_val = img.max()
+
+            valid = img[img > 0]
+
+            if valid.size == 0:
+                continue
+
+            band_max = int(valid.max())
+            global_max = max(global_max, band_max)
+
+            print(f"{scene_id} {band_name}: max={band_max}")
+
+    if global_max == 0:
+        raise RuntimeError("Global max non valido: tutte le immagini sembrano vuote.")
+
+    print(f"\nGLOBAL_MAX_DATASET = {global_max}")
+    return float(global_max)
+
+
+def normalize_cube_per_channel(cube, global_max):
     """
     Normalizza ogni canale del cubo separatamente in [0, 1].
     I pixel NoData (=0) vengono preservati a 0.0.
@@ -193,30 +219,14 @@ def normalize_cube_per_channel(cube):
 
     cube_float = np.zeros_like(cube, dtype=np.float32)
 
-    for c in range(cube.shape[-1]):
+    valid_mask = cube > 0
 
-        channel = cube[:, :, c]
-
-        valid_mask = channel > 0
-        valid = channel[valid_mask]
-
-        if valid.size == 0:
-            continue
-
-        channel_min = valid.min()
-        channel_max = valid.max()
-
-        if channel_max == channel_min:
-            cube_float[:, :, c][valid_mask] = 1.0
-            continue
-
-        cube_float[:, :, c][valid_mask] = (
-            channel[valid_mask].astype(np.float32) - channel_min
-        ) / (channel_max - channel_min)
+    cube_float[valid_mask] = cube[valid_mask].astype(np.float32) / float(global_max)
+    cube_float = np.clip(cube_float, 0.0, 1.0)
 
     return cube_float
 
-def save_cube_patches(scene_id, b4, b5, b6, output_folder):
+def save_cube_patches(scene_id, b4, b5, b6, output_folder, global_max):
     """
     Crea cubi a 3 canali e salva patch 512x512.
     Ordine canali: B5, B6, B4.
@@ -236,7 +246,7 @@ def save_cube_patches(scene_id, b4, b5, b6, output_folder):
             patch_b6 = b6[y:y + PATCH_SIZE, x:x + PATCH_SIZE]
 
             cube = np.stack([patch_b5, patch_b6, patch_b4], axis=-1)
-            cube_norm = normalize_cube_per_channel(cube)
+            cube_norm = normalize_cube_per_channel(cube, global_max)
 
             #Cube RGB unti16
             output_name = f"RGB_{scene_id}_{patch_index:04d}.tif"
@@ -274,6 +284,7 @@ def save_cube_patches(scene_id, b4, b5, b6, output_folder):
 def process_dataset(input_folder, output_folder):
     triplets = group_triplets(input_folder)
 
+    global_max = compute_global_max(triplets)
     for scene_id, bands in triplets.items():
         print(f"\nElaboro scena: {scene_id}")
 
@@ -293,9 +304,7 @@ def process_dataset(input_folder, output_folder):
         print("B5:", b5.shape)
         print("B6:", b6.shape)
 
-        save_cube_patches(scene_id, b4, b5, b6, output_folder)
-
-
+        save_cube_patches(scene_id, b4, b5, b6, output_folder, global_max)
 
 
 

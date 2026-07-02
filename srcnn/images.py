@@ -12,9 +12,9 @@ try:
 except Exception:
     from psnr import compute_psnr
 
-reference = np.load(ASSETS_DIR / "reference.npy")
-bicubic = np.load(ASSETS_DIR / "bicubic.npy")
-srcnn = np.load(ASSETS_DIR / "srcnn_pred_clip.npy")
+reference = np.load(ASSETS_DIR / "reference_b.npy")
+bicubic = np.load(ASSETS_DIR / "bicubic_b.npy")
+srcnn = np.load(ASSETS_DIR / "srcnn_pred_clip_b.npy")
 
 reference = np.clip(reference, 0.0, 1.0)
 bicubic = np.clip(bicubic, 0.0, 1.0)
@@ -36,7 +36,9 @@ axs[2].axis("off")
 
 plt.tight_layout()
 
-output_path = ASSETS_DIR / "comparison_reference_bicubic_srcnn4.png"
+#output_path = ASSETS_DIR / "comparison_reference_bicubic_srcnn4.png"
+output_path = ASSETS_DIR / "best_case.png"
+
 plt.savefig(output_path, dpi=200, bbox_inches="tight")
 print(f"Saved: {output_path}")
 
@@ -55,6 +57,6 @@ axs[1].axis("off")
 
 plt.tight_layout()
 
-output_path = ASSETS_DIR / "error_maps_bicubic_srcnn4.png"
+output_path = ASSETS_DIR / "error_maps_best_case.png"
 plt.savefig(output_path, dpi=200, bbox_inches="tight")
 print(f"Saved: {output_path}")

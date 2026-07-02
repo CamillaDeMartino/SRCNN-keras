@@ -16,9 +16,14 @@ def compute_psnr(target, ref, max_val = 1.0):
     target_data = np.array(target, dtype=np.float32)
     ref_data = np.array(ref, dtype=np.float32)
 
+    # Skip images where the reference is mostly empty (e.g. all black)    
+    valid_mask = np.mean(ref_data, axis=2) > 0.001
+    if not np.any(valid_mask):
+        return float("nan")
+
     #diff = ref_data - target_data
-    #rmse = math.sqrt(np.mean(diff ** 2))
-    mse = np.mean((ref_data - target_data) ** 2)
+    #rmse = math.sqrt(np.mean(diff ** 2))    
+    mse = np.mean((ref_data[valid_mask] - target_data[valid_mask]) ** 2)
 
     if mse == 0:
         return float("inf")
@@ -29,15 +34,14 @@ def compute_psnr(target, ref, max_val = 1.0):
 
 
 if __name__ == "__main__":
-    reference = np.load(ASSETS_DIR / "reference.npy")
-    bicubic = np.load(ASSETS_DIR / "bicubic.npy")
-    srcnn = np.load(ASSETS_DIR / "srcnn_pred_clip.npy")
+    reference = np.load(ASSETS_DIR / "reference_w.npy")
+    bicubic = np.load(ASSETS_DIR / "bicubic_w.npy")
+    srcnn = np.load(ASSETS_DIR / "srcnn_pred_clip_w.npy")
 
     print("Shapes:")
     print("Reference:", reference.shape)
     print("Bicubic:", bicubic.shape)
     print("SRCNN:", srcnn.shape)
-
     
     psnr_bicubic = compute_psnr(bicubic, reference, max_val=1.0)
     psnr_srcnn = compute_psnr(srcnn, reference, max_val=1.0)
@@ -72,9 +76,10 @@ if __name__ == "__main__":
     print("\nskimage Gain:")
     print(sk_psnr_srcnn - sk_psnr_bicubic)
 
-    mae_bicubic = np.mean(np.abs(reference - bicubic))
-    mae_srcnn = np.mean(np.abs(reference - srcnn))
-    mae_srcnn_vs_bicubic = np.mean(np.abs(srcnn - bicubic))
+    valid_mask = np.mean(reference, axis=2) > 0.001
+    mae_bicubic = np.mean(np.abs(reference[valid_mask] - bicubic[valid_mask]))
+    mae_srcnn = np.mean(np.abs(reference[valid_mask] - srcnn[valid_mask]))
+    mae_srcnn_vs_bicubic = np.mean(np.abs(srcnn[valid_mask] - bicubic[valid_mask]))
 
     print("MAE Bicubic vs Ref:", mae_bicubic)
     print("MAE SRCNN vs Ref:", mae_srcnn)

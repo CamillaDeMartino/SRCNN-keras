@@ -26,6 +26,12 @@ def load_cube(path):
 
     return img.astype(np.float32)
 
+# Tieni la patch solo se almeno l'1% dei pixel contiene dati reali
+def is_valid_patch(path, threshold=0.01):
+    arr = np.load(path)
+    valid_fraction = np.mean(arr > 0)
+    return valid_fraction >= threshold
+
 # Prepare Data for Testing and Validation
 def prepare_data(_path):
     folder = Path(_path)
@@ -64,9 +70,6 @@ def prepare_data(_path):
 
     return data, label
 
-# BORDER_CUT = 8
-BLOCK_STEP = 16
-BLOCK_SIZE = 32
 
 # Prepare Data for Training
 def prepare_crop_data(_path):
@@ -173,6 +176,12 @@ def write_crop_data_hdf5(_path, output_filename):
                     hr_patch = hr_img[x:x + BLOCK_SIZE, y:y + BLOCK_SIZE].astype(np.float32)
                     lr_patch = lr_img[x:x + BLOCK_SIZE, y:y + BLOCK_SIZE].astype(np.float32)
 
+                    valid_fraction = np.mean(hr_patch > 0)
+                    
+                    # Tieni la patch solo se almeno l'1% dei pixel contiene dati reali
+                    if valid_fraction < 0.01:
+                        continue
+
                     lr_center = lr_patch[
                         conv_side:-conv_side,
                         conv_side:-conv_side,
@@ -184,7 +193,6 @@ def write_crop_data_hdf5(_path, output_filename):
                         conv_side:-conv_side,
                         :
                     ]
-
 
                     residual = hr_center - lr_center
 
@@ -262,6 +270,12 @@ def write_test_data_hdf5(_path, output_filename):
                 lr_patch = lr_img[x:x + Patch_size, y:y + Patch_size].astype(np.float32)
                 hr_patch = hr_img[x:x + Patch_size, y:y + Patch_size].astype(np.float32)
 
+                valid_fraction = np.mean(hr_patch > 0)
+
+                # Tieni la patch solo se almeno l'1% dei pixel contiene dati reali
+                if valid_fraction < 0.01:
+                    continue
+
                 lr_center = lr_patch[
                     conv_side:-conv_side,
                     conv_side:-conv_side,
@@ -281,6 +295,9 @@ def write_test_data_hdf5(_path, output_filename):
 
                 batch_data.append(lr)
                 batch_label.append(residual)
+
+            if not batch_data:
+                continue    
 
             batch_data = np.array(batch_data, dtype=np.float32)
             batch_label = np.array(batch_label, dtype=np.float32)
@@ -310,64 +327,59 @@ def read_training_data(file):
 
 
 def main():
-    # TRAIN_RGB.mkdir(parents=True, exist_ok=True)
-    # TEST_RGB.mkdir(parents=True, exist_ok=True)
-    # PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-    # #all_images = sorted([f for f in RGB_NORM.iterdir() if f.suffix.lower() in VALID_EXT and f.is_file()])
-    
-    # all_images = [
-    #     f for f in RGB_NORM.iterdir()
-    #     if f.suffix.lower() == ".npy" and f.is_file()
-    # ]
+    if TRAIN_RGB.exists():
+        shutil.rmtree(TRAIN_RGB)
+    if TEST_RGB.exists():
+        shutil.rmtree(TEST_RGB)
 
-    # # Only select images with non-zero values
-    # valid_images = []
+    TRAIN_RGB.mkdir(parents=True, exist_ok=True)
+    TEST_RGB.mkdir(parents=True, exist_ok=True)
+    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-    # for f in all_images:
-    #     arr = np.load(f)
-    #     if arr.max() > 0:
-    #         valid_images.append(f)
+    all_images = [
+        f for f in RGB_NORM.iterdir()
+        if f.suffix.lower() == ".npy" and f.is_file()
+    ]
 
-    # # Select 47 + 58 images
-    # # selected = random.sample(all_images, 105)
-    # # train_imgs = selected[:91]
-    # # test_imgs = selected[91:]
-    # scene_ids = []
-    # for f in valid_images:
+    valid_images = [f for f in all_images if is_valid_patch(f, threshold=0.01)]
 
-    #     stem = f.stem
 
-    #     # RGB_<scene_id>_<patch>
-    #     scene_id = "_".join(stem.split("_")[1:-1])
+    scene_ids = []
+    for f in valid_images:
 
-    #     if scene_id not in scene_ids:
-    #         scene_ids.append(scene_id)
+        stem = f.stem
 
-    # random.seed(42)
-    # random.shuffle(scene_ids)
-    # split_idx = int(len(scene_ids) * 0.7)   #70% training, 30% test
+        # RGB_<scene_id>_<patch>
+        scene_id = "_".join(stem.split("_")[1:-1])
 
-    # train_scene_ids = scene_ids[:split_idx]
-    # test_scene_ids = scene_ids[split_idx:]    
+        if scene_id not in scene_ids:
+            scene_ids.append(scene_id)
 
-    # train_imgs = []
-    # test_imgs = []
+    random.seed(42)
+    random.shuffle(scene_ids)
+    split_idx = int(len(scene_ids) * 0.7)   #70% training, 30% test
 
-    # for f in valid_images:
+    train_scene_ids = scene_ids[:split_idx]
+    test_scene_ids = scene_ids[split_idx:]    
 
-    #     scene_id = "_".join(f.stem.split("_")[1:-1])
+    train_imgs = []
+    test_imgs = []
 
-    #     if scene_id in train_scene_ids:
-    #         train_imgs.append(f)
-    #     else:
-    #         test_imgs.append(f)
+    for f in valid_images:
 
-    # # Copy file into folder
-    # for img in train_imgs:
-    #     shutil.copy(str(img), str(TRAIN_RGB / img.name))
-    # for img in test_imgs:
-    #     shutil.copy(str(img), str(TEST_RGB / img.name))
+        scene_id = "_".join(f.stem.split("_")[1:-1])
+
+        if scene_id in train_scene_ids:
+            train_imgs.append(f)
+        else:
+            test_imgs.append(f)
+
+    # Copy file into folder
+    for img in train_imgs:
+        shutil.copy(str(img), str(TRAIN_RGB / img.name))
+    for img in test_imgs:
+        shutil.copy(str(img), str(TEST_RGB / img.name))
 
 
     print(len(list(TRAIN_RGB.iterdir())))

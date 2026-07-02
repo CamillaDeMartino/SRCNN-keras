@@ -29,3 +29,6 @@ BLOCK_SIZE = 32
 
 # File extensions
 VALID_EXT = [".png", ".tif", ".tiff", ".TIFF", ".jpg", ".jpeg", ".jp2"]
+
+# Bands
+BANDS_REQUIRED = ["B4", "B5", "B6"]
