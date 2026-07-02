@@ -1,42 +1,150 @@
-# Keras implementation of SRCNN
+# SRCNN for Landsat Multi-Spectral Image Super-Resolution
 
+Implementation of a Super-Resolution Convolutional Neural Network (SRCNN) adapted for multi-spectral Landsat imagery.
 
-The original paper is [Learning a Deep Convolutional Network for Image Super-Resolution](https://arxiv.org/abs/1501.00092)
+This project extends the original SRCNN architecture to reconstruct high-resolution multi-spectral Landsat images from synthetically degraded low-resolution inputs.
+---
 
+## Overview
+
+The project includes:
+
+- preparation of Landsat multi-spectral datasets
+- automatic patch extraction
+- global normalization
+- bicubic degradation pipeline
+- residual-learning SRCNN
+- quantitative evaluation (PSNR, SSIM, MAE)
+- visualization utilities
+- experimental Bayer mosaic evaluation pipeline
+
+---
+
+## Dataset
+
+The implementation has been developed using Landsat imagery.
+
+The current pipeline supports three-band image cubes composed of:
+
+- **B5** (Near Infrared)
+- **B6** (Short Wave Infrared)
+- **B4** (Red)
+
+Images are normalized in the range **[0,1]** using a global normalization strategy before training.
+
+---
+
+## Project Structure
+
+```
+srcnn/
+    config.py
+    prepare_data.py
+    generate_rgb.py
+    images.py
+    main.py
+    psnr.py
+    test_mosaic.py
+
+tests/
+
+data/
+    raw/
+    processed/
+
+weights/
+
+assets/
+```
+
+---
+
+## Dataset Preparation
+
+Generate training patches:
+
+```bash
+python -m srcnn.prepare_data
+```
+
+The preprocessing pipeline performs:
+
+- patch extraction
+- global normalization
+- low-resolution image generation
+- training/validation split
+
+---
+
+## Training
+
+Train the SRCNN model:
+
+```bash
+python -m srcnn.main
+```
+
+The current implementation uses:
+
+- TensorFlow / Keras
+- Residual learning
+- Adam optimizer
+- Global normalization
+- Early stopping
+- Model checkpointing
+
+---
+
+## Evaluation
+
+The repository provides utilities for:
+
+- PSNR
+- SSIM
+- MAE
+- Bicubic vs SRCNN comparison
+- Batch evaluation on multiple images
+- Best/Worst case analysis
+- Visualization of reconstruction and error maps
+
+---
+
+## Example Result
+
+Comparison between the high-resolution reference image, bicubic interpolation and the SRCNN reconstruction on one of the best-performing Landsat test patches.
 <p align="center">
-  <img src="https://github.com/MarkPrecursor/SRCNN-keras/blob/master/SRCNN.png" width="800"/>
+  <img src="assets/best_case.png" width="900"/>
 </p>
 
-My implementation have some difference with the original paper, include:
+---
 
-* use Adam alghorithm for optimization, with learning rate 0.0003 for all layers.
-* Use the opencv library to produce the training data and test data, not the matlab library. This difference may caused some deteriorate on the final results.
-* I did not set different learning rate in different layer, but I found this network still work.
-* The color space of YCrCb in Matlab and OpenCV also have some difference. So if you want to compare your results with some academic paper, you may want to use the code written with matlab.
+## Experimental Bayer Pipeline
 
-## Use:
-### Create your own data
-Put your RGB training images in `data/raw/RGB/` or update the fallback path in `srcnn/prepare_data.py`.
+An additional experimental pipeline is available in
 
-Excute:
-`python -m srcnn.prepare_data`
+```text
+srcnn/test_mosaic.py
+```
 
-### training and test:
-Excute:
-`python -m srcnn.main`
+This module investigates Bayer-like mosaic generation from Landsat spectral bands followed by demosaicing and super-resolution.
 
-## Project layout:
-* `srcnn/` - source code
-* `data/` - training, test and processed datasets
-* `assets/` - example images used by the demo scripts
-* `weights/` - model checkpoints and weights
-* `outputs/` - generated predictions and intermediate results
+The implementation is currently intended for research purposes.
 
+---
 
-## Result(training for 200 epoches on 91 images, with upscaling factor 2):
-Results on Set5 dataset:
-<p align="center">
-  <img src="https://github.com/MarkPrecursor/SRCNN-keras/blob/master/result.png" width="800"/>
-</p>
+## References
 
+Dong, C., Loy, C. C., He, K., & Tang, X.
 
+**Learning a Deep Convolutional Network for Image Super-Resolution**
+
+https://arxiv.org/abs/1501.00092
+
+## Installation
+
+Clone the repository and install the required packages:
+
+```bash
+git clone https://github.com/<username>/SRCNN-keras.git
+cd SRCNN-keras
+pip install -r requirements.txt
